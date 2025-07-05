@@ -1,0 +1,123 @@
+name: Sync Upstream and Convert MD to JSON
+
+on:
+  # 每12小时运行一次（每半天）
+  schedule:
+    - cron: '0 */12 * * *'  # 每天0点和12点运行
+  
+  # 允许手动触发
+  workflow_dispatch:
+
+jobs:
+  sync-and-convert:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout current branch
+      uses: actions/checkout@v4
+      with:
+        ref: mcp  # 确保在mcp分支上
+        fetch-depth: 0  # 获取完整历史，用于同步
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup upstream remote
+      run: |
+        git remote add upstream https://github.com/Anduin2017/HowToCook.git || true
+        git fetch upstream
+    
+    - name: Sync with upstream master
+      run: |
+        # 获取上游更新
+        git fetch upstream master
+        
+        # 检查是否有新的提交需要同步
+        LOCAL=$(git rev-parse HEAD)
+        UPSTREAM=$(git rev-parse upstream/master)
+        
+        if [ "$LOCAL" != "$UPSTREAM" ]; then
+          echo "Found new commits from upstream, syncing..."
+          
+          # 合并上游更改
+          git merge upstream/master --no-edit
+          
+          echo "SYNC_NEEDED=true" >> $GITHUB_ENV
+        else
+          echo "No new commits from upstream"
+          echo "SYNC_NEEDED=false" >> $GITHUB_ENV
+        fi
+    
+    - name: Setup Python
+      if: env.SYNC_NEEDED == 'true'
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Run conversion script
+      if: env.SYNC_NEEDED == 'true'
+      run: |
+        echo "Running MD to JSON conversion..."
+        python convert_md_to_json.py
+        
+        # 检查是否生成了新的recipes.json
+        if [ -f "recipes.json" ]; then
+          echo "Conversion completed successfully"
+          echo "JSON file size: $(wc -c < recipes.json) bytes"
+          echo "Number of recipes: $(grep -c '"id":' recipes.json)"
+        else
+          echo "Error: recipes.json was not generated"
+          exit 1
+        fi
+    
+    - name: Commit and push changes
+      if: env.SYNC_NEEDED == 'true'
+      run: |
+        # 配置git用户信息
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # 添加更改
+        git add .
+        
+        # 检查是否有需要提交的更改
+        if ! git diff --staged --quiet; then
+          # 创建提交信息
+          RECIPE_COUNT=$(grep -c '"id":' recipes.json)
+          git commit -m "Auto-sync: Update from upstream and regenerate recipes.json
+          
+          - Synced with upstream master branch
+          - Regenerated recipes.json with ${RECIPE_COUNT} recipes
+          - Updated image links to point to mcp branch
+          
+          🤖 Automated update by GitHub Actions"
+          
+          # 推送到mcp分支
+          git push origin mcp
+          
+          echo "Changes committed and pushed successfully"
+        else
+          echo "No changes to commit"
+        fi
+    
+    - name: Create summary
+      run: |
+        echo "## Sync and Convert Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "$SYNC_NEEDED" = "true" ]; then
+          echo "✅ **Sync Status**: New changes detected and processed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Conversion**: Successfully converted MD files to JSON" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "recipes.json" ]; then
+            RECIPE_COUNT=$(grep -c '"id":' recipes.json)
+            FILE_SIZE=$(wc -c < recipes.json)
+            echo "📊 **Results**:" >> $GITHUB_STEP_SUMMARY
+            echo "- Total recipes: ${RECIPE_COUNT}" >> $GITHUB_STEP_SUMMARY
+            echo "- JSON file size: ${FILE_SIZE} bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "ℹ️ **Sync Status**: No new changes from upstream" >> $GITHUB_STEP_SUMMARY
+          echo "⏭️ **Action**: Skipped conversion (no updates needed)" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Next sync**: $(date -d '+12 hours' '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY

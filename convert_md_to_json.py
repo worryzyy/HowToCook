@@ -299,8 +299,10 @@ class MarkdownParser:
         return recipes
 
 def main():
-    dishes_dir = '/mnt/e/WL_Project/Python/HowToCook/dishes'
-    output_file = '/mnt/e/WL_Project/Python/HowToCook/recipes.json'
+    # 自动检测dishes目录位置
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    dishes_dir = os.path.join(current_dir, 'dishes')
+    output_file = os.path.join(current_dir, 'recipes.json')
     
     parser = MarkdownParser(dishes_dir)
     recipes = parser.convert_all()
