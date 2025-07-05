@@ -7,6 +7,10 @@ on:
   
   # 允许手动触发
   workflow_dispatch:
+  
+  # 临时添加：当推送到mcp分支时触发（用于测试）
+  push:
+    branches: [ mcp ]
 
 jobs:
   sync-and-convert:
